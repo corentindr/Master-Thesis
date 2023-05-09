@@ -1,0 +1,161 @@
+from bs4 import BeautifulSoup
+import requests
+import pandas as pd
+import json
+
+
+Retreive all URL of the top x varieties
+
+def get_top_cepages(x):
+    """
+    @param x : number of varieties required (8) in our case
+    pre : x, the number of varieties
+    post : the list of urls of the 8 varieties we wanted on the winedexer website
+    """
+    to_retreive = ("cabernet-sauvignon","chardonnay","pinot-noir","merlot","riesling","malbec","sangiovese","zinfandel")
+    # Basic url
+    url = "https://www.winedexer.com/top-vin-cepage"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, "html.parser")
+    grape_links = soup.find_all("link")
+    top = []
+    for link in grape_links:
+        href = link.get("href")
+        if href and href.startswith("/top-vin-cepage/") and href.endswith(to_retreive):
+            cepage_url = "https://www.winedexer.com" + href
+            top.append(cepage_url)
+            if len(top) == x:
+                break
+    return top
+
+#Access the URL of each wine 
+
+def extract_cepages(url):
+    """
+    @param url : url extension of a wine (url without "https://www.winedexer.com")
+    pre : url extension of a wine
+    post : return True is the wine is composed of only one grape variety, False otherwise
+    """
+    response = requests.get("https://www.winedexer.com"+url)
+    soup = BeautifulSoup(response.content, "html.parser")
+    grape_links = soup.find_all("a")
+    cepage_list = []
+    for a in grape_links:
+        style = a.get("href")
+        if style and style.startswith("/top-vin-cepage-pays/"):
+            cepage_list.append(a.get_text())
+    if len(cepage_list) == 1:
+        return True
+    else:
+        return False
+def get_url_wines(x,list_of_quantities):
+    """
+    @param x : number of varieties required (8) in our case
+    @param list_of_quantities: a list specifying the number of observations wished for each class. The length 
+    of this list should then be equal to the parameter x. The quantities of this list will follow the same order than the
+    output of get_top_cepages
+    
+    pre : x & list_of_quantities
+    post : a list of all urls needed
+    
+    """
+    # Get the list of urls for the different varieties
+    list_of_url = get_top_cepages(x)
+    list_of_wine_link = []
+    counter = 0
+    
+    #For each variety
+    for url in list_of_url: 
+        nbr = 0
+        blend = 0
+        counter2 = 1
+        first = True
+        # While I have not reached the number of observations desired for this specific variety
+        while nbr < list_of_quantities[counter]: 
+
+            # I check if this is the first iteration : if yes, I keep the url of the variety as it is, If not, I access the next page
+            if first:
+                response = requests.get(url)
+            else:
+                response = requests.get(url + "?page=" + str(counter2))
+            
+            # I parse the html page of the variety to retreive all urls of the wines and I check if there is only one variety
+            # I back up the urls in a json file
+            soup = BeautifulSoup(response.content, "html.parser")
+            allas = soup.find_all("a")
+            for a in allas:
+                href = a.get("href")
+                if href and href.startswith("/vin") and len(list_of_wine_link) < sum(list_of_quantities) and nbr <list_of_quantities[counter]:
+                    if (extract_cepages(href)== True):
+                        list_of_wine_link.append(href)
+                        nbr+=1
+                        print(nbr)
+                        with open(f"output_urls.json", 'w', encoding='utf-8') as f:
+                            json.dump(list_of_wine_link, f, ensure_ascii=False, indent=4, default=str)
+            counter2+=1 
+            first = False
+            # There is a maximum of 10 pages on the website
+            if counter2 == 11:
+                break
+        # If after the 10 pages, I still dont have the required number of observations, I retreive wine urls by country this time
+        if nbr < list_of_quantities[counter]:
+            # While I have not reached the number of observations desired for this specific variety
+            while nbr < list_of_quantities[counter]:
+                first = True
+                list_of_countries = ["albanie","argentine","armenie","australie","autriche","azerbaijan","belgique","bolivie",
+                                     "bresil","bulgarie","canada","chili","chine","croatie","chypre","republique-tcheque",
+                                     "danemark","equateur","france","georgie","allemagne","grece","hongrie","inde","israel",
+                                     "italie","japon","kazakhstan","kosovo","liban","luxembourg","macedoine","malte","mexique",
+                                     "moldavie","montenegro","maroc","pays-bas","nouvelle-zelande","palestine","perou","pologne",
+                                     "portugal","roumanie","russie","serbie","slovaquie","slovenie","afrique-du-sud","espagne",
+                                     "suede","suisse","tunisie","turquie","ukraine","royaume-uni","etats-unis","uruguay"]
+                # For each country
+                for i in list_of_countries:
+                    counter2 = 1
+                    try:
+                        # I check if this is the first iteration : if yes, I keep the url of the variety as it is, If not, I access the next page
+
+                        if first:
+                            response = requests.get(url+i)
+                        else:
+                            response = requests.get(url + i +"?page=" + str(counter2))
+                        soup = BeautifulSoup(response.content, "html.parser")
+                        allas = soup.find_all("a")
+                        
+                        #I parse the html page ad retreive all urls of wines with only one variety
+                        # I back up the urls in a json file
+                        for a in allas:
+                            href = a.get("href")
+                            new_page = a.get("class")
+                            if href and href.startswith("/vin") and len(list_of_wine_link) < sum(list_of_quantities) and nbr <list_of_quantities[counter]:
+                                if (extract_cepages(href)== True):
+                                    list_of_wine_link.append(href)
+                                    nbr+=1
+                                    print(nbr)
+                                    with open(f"output_urls.json", 'w', encoding='utf-8') as f:
+                                        json.dump(list_of_wine_link, f, ensure_ascii=False, indent=4, default=str)
+                                    if nbr == list_of_quantities[counter]:
+                                        break
+                            # I check if there is a second page, if not, we change of country
+                            if new_page and new_page.startswith("page-link disabled") and new_page.get_text() == "Vins suivants":
+                                new_page = False
+                        counter+=1
+                        first = False
+                        if new_page == False:
+                            break
+                    except:
+                        continue
+            
+        
+        counter+=1
+    return list_of_wine_link
+
+
+
+#result = get_url_wines(8,[8182,8696,8802,3131,3384,1910,1860,2403])
+result = get_url_wines(8,[2000,500,500,500,500,500,500,500])
+df = pd.DataFrame(result, columns = ['URLS'])
+df.to_csv("urls.csv")
+
+
+    
